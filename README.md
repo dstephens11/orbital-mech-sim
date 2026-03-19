@@ -5,9 +5,9 @@ Searches heliocentric transfer opportunities from Earth to Jupiter using Lambert
 The code currently evaluates:
 - direct Earth -> Jupiter transfers
 - 1 gravity assist transfers using Venus or Mars
-- 2 gravity assist transfers using Venus, Earth, and Mars in the allowed sequences coded in the solver
+- 2 gravity assist transfers using Venus, Earth, and Mars
 
-It loads planetary ephemerides from JPL Horizons, searches a launch/arrival grid, filters gravity assists using an unpowered flyby feasibility check, and then produces porkchop plots plus propagated trajectory plots and animations for the best solutions.
+Code fetches planetary ephemerides from JPL Horizons, searches a launch/arrival grid, filters gravity assists using an unpowered flyby feasibility check, and then produces porkchop plots & propagated trajectory plots/animations for the best solutions.
 
 ## What The Code Does
 
@@ -37,44 +37,55 @@ Units:
 
 ## Outputs
 
-Running the code creates plots in `plots/`.
+Each run creates a new timestamped directory under `results/`, for example:
 
-Porkchop plots:
+- `results/2026-03-18_15-30-12/`
+
+That folder contains:
+- `run_config.json`: the full run configuration and best-solution summary
+- porkchop plots
+- trajectory plots
+- trajectory animations
+
+Porkchop plots produced for launch, arrival, and total `v_inf`:
 - direct
 - 1 gravity assist
 - 2 gravity assists
 
-Each is produced for:
-- launch `v_inf`
-- arrival `v_inf`
-- total `v_inf`
-
-Best-trajectory products:
-- `plots/trajectory_plot_total.png`
-- `plots/trajectory_animation_total.mp4`
-- `plots/trajectory_plot_launch.png`
-- `plots/trajectory_animation_launch.mp4`
-- `plots/trajectory_plot_arrival.png`
-- `plots/trajectory_animation_arrival.mp4`
+Best-trajectory products for types {launch, total, arrival}:
+- `trajectory_plot_{type}.png`
+- `trajectory_animation_{type}}.mp4`
 
 The console output also prints summaries for the best total-, launch-, and arrival-`v_inf` trajectories.
 
 ## Configuration
 
-The main search settings live in `run.py`:
+Run settings are command-line arguments and default to the current built-in values.
 
-- `MAX_REVS`: maximum Lambert revolutions
-- `TOPK_DIRECT`: pruning width for direct Earth -> Jupiter legs
-- `TOPK_GA`: pruning width for gravity-assist-related legs
-- `NUM_WORKERS`: number of multiprocessing workers for Lambert precomputation
+Main search arguments:
+- `--start`: search window start date, default `2026-07-01`
+- `--stop`: search window stop date, default `2055-07-01`
+- `--step`: ephemeris cadence in days, default `10`
+- `--max-years`: maximum total trajectory duration in years, default `10`
+- `--max-revs`: maximum Lambert revolutions, default `2`
+- `--topk-direct`: pruning width for direct Earth -> Jupiter legs, default `20`
+- `--topk-ga`: pruning width for gravity-assist-related legs, default `80`
+- `--num-workers`: multiprocessing worker count, default auto-select
+- `--thresh-kms`: storage threshold for launch or arrival `v_inf` in km/s, default `8.0`
 
-Search window settings:
-- `start`
-- `stop`
-- `step`
+Flyby-screening arguments:
+- `--h-min-km`: minimum flyby altitude in km
+- `--h-max-km`: maximum flyby altitude in km
+- `--vinf-match-abs-kms`: allowed incoming/outgoing `v_inf` magnitude mismatch in km/s
+
+Annotated porkchop arguments:
+- `--annotate`: enable annotated porkchop plots
+- `--window-best-launch`
+- `--window-best-arrival`
+- `--window-start`
+- `--window-end`
 
 Notes:
-- `NUM_WORKERS = None` uses an automatic worker count.
 - On macOS/PyCharm, the code uses multiprocessing with the `spawn` start method.
 - Large search windows with fine cadence can still take significant time.
 
@@ -87,9 +98,7 @@ The code uses:
 - Matplotlib
 - astroquery
 - lamberthub
-
-Animation output also expects:
-- `ffmpeg`
+- ffmpeg
 
 ## Running
 
@@ -98,6 +107,20 @@ Run:
 ```bash
 python3 run.py
 ```
+
+Example with custom search settings:
+
+```bash
+python3 run.py --start 2028-01-01 --stop 2040-01-01 --step 20 --max-years 8 --topk-ga 120 --num-workers 8
+```
+
+Example with annotated porkchops:
+
+```bash
+python3 run.py --annotate --window-best-launch 2028-12-24 --window-best-arrival 2031-12-01 --window-start 2028-12-13 --window-end 2029-01-06
+```
+
+After the run starts, the console prints the output directory being used for that run.
 
 ## Current Flyby Model
 
@@ -112,4 +135,4 @@ This is a screening model, not a full patched-conic mission design tool.
 
 - The Horizons query can take time for long windows.
 - Lambert precomputation is the main runtime cost.
-- Progress messages are printed during Lambert leg generation so long runs are easier to monitor.
+- Exact run settings are saved in `run_config.json`.

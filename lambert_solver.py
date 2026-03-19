@@ -5,8 +5,7 @@ from lamberthub import gooding1990
 
 import constants as c
 
-# Keep and store solutions with vinf < 12 km/s at launch and/or arrival
-# THRESH_KMS = 12.0
+# Keep and store solutions with vinf < 8 km/s at launch and/or arrival
 THRESH_KMS = 8.0
 
 _PRECOMPUTE_CTX = {}
@@ -51,10 +50,17 @@ def flyby_is_feasible_unpowered(
     vinf_out_kms_vec,
     mu_km3_s2,
     r_body_km,
-    hmin_km=c.H_MIN,
-    hmax_km=c.H_MAX,
-    vinf_match_abs_kms=c.VINF_MATCH_ABS_KMS,
+    hmin_km=None,
+    hmax_km=None,
+    vinf_match_abs_kms=None,
 ):
+    if hmin_km is None:
+        hmin_km = c.H_MIN
+    if hmax_km is None:
+        hmax_km = c.H_MAX
+    if vinf_match_abs_kms is None:
+        vinf_match_abs_kms = c.VINF_MATCH_ABS_KMS
+
     vinf_in = np.linalg.norm(vinf_in_kms_vec)
     vinf_out = np.linalg.norm(vinf_out_kms_vec)
 
@@ -95,7 +101,7 @@ def _default_num_workers(num_departures):
 
 
 def _progress_stride(total_items):
-    return max(1, total_items // 5)
+    return max(1, total_items // 4)
 
 
 def _print_progress(label, completed, total):
@@ -104,7 +110,16 @@ def _print_progress(label, completed, total):
 
 
 def _init_precompute_worker(
-    P_pos, P_vel, Q_pos, Q_vel, elapsed_days, from_body, to_body, max_revs, topk
+    P_pos,
+    P_vel,
+    Q_pos,
+    Q_vel,
+    elapsed_days,
+    from_body,
+    to_body,
+    max_revs,
+    topk,
+    max_tof_days,
 ):
     global _PRECOMPUTE_CTX
     _PRECOMPUTE_CTX = {
@@ -117,6 +132,7 @@ def _init_precompute_worker(
         "to_body": to_body,
         "max_revs": max_revs,
         "topk": topk,
+        "max_tof_days": max_tof_days,
     }
 
 
@@ -130,6 +146,8 @@ def _precompute_departure_index(i):
     legs = []
     for j in range(i + 1, N):
         tof_days = elapsed_days[j] - elapsed_days[i]
+        if ctx["max_tof_days"] is not None and tof_days > ctx["max_tof_days"]:
+            continue
         sols = lambert_solutions(r1, ctx["Q_pos"][j], tof_days, ctx["max_revs"])
         if not sols:
             continue
@@ -160,7 +178,14 @@ def _precompute_departure_index(i):
 
 
 def precompute_legs(
-    bodies, elapsed_days, from_body, to_body, max_revs=2, topk=20, num_workers=None
+    bodies,
+    elapsed_days,
+    from_body,
+    to_body,
+    max_revs=2,
+    topk=20,
+    num_workers=None,
+    max_tof_days=None,
 ):
     """
     Returns a dict keyed by (i_dep, i_arr) with a list of Lambert solutions.
@@ -195,6 +220,7 @@ def precompute_legs(
             to_body,
             max_revs,
             topk,
+            max_tof_days,
         )
         results = []
         for completed, i in enumerate(range(N), start=1):
@@ -217,6 +243,7 @@ def precompute_legs(
                 to_body,
                 max_revs,
                 topk,
+                max_tof_days,
             ),
         ) as pool:
             results = []
@@ -229,8 +256,6 @@ def precompute_legs(
                 results.append(result)
                 if completed == 1 or completed % progress_stride == 0 or completed == N:
                     _print_progress(progress_label, completed, N)
-
-    print(f"Finished Lambert precompute for {progress_label}.")
 
     return dict(results)
 
@@ -279,47 +304,133 @@ def calculate_trajectories(
     topk_direct=20,
     topk_ga=80,
     num_workers=None,
+    max_years=10.0,
 ):
+    max_tof_days = 365.25 * max_years
     print("Beginning Lambert leg generation...")
     EJ_direct = precompute_legs(
-        bodies, elapsed_days, "Earth", "Jupiter", max_revs, topk_direct, num_workers
+        bodies,
+        elapsed_days,
+        "Earth",
+        "Jupiter",
+        max_revs,
+        topk_direct,
+        num_workers,
+        max_tof_days,
     )
     EJ_ga = precompute_legs(
-        bodies, elapsed_days, "Earth", "Jupiter", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Earth",
+        "Jupiter",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
 
     EV = precompute_legs(
-        bodies, elapsed_days, "Earth", "Venus", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Earth",
+        "Venus",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     EM = precompute_legs(
-        bodies, elapsed_days, "Earth", "Mars", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Earth",
+        "Mars",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
 
     VJ = precompute_legs(
-        bodies, elapsed_days, "Venus", "Jupiter", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Venus",
+        "Jupiter",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     MJ = precompute_legs(
-        bodies, elapsed_days, "Mars", "Jupiter", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Mars",
+        "Jupiter",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
 
     VE = precompute_legs(
-        bodies, elapsed_days, "Venus", "Earth", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Venus",
+        "Earth",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     VM = precompute_legs(
-        bodies, elapsed_days, "Venus", "Mars", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Venus",
+        "Mars",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     MV = precompute_legs(
-        bodies, elapsed_days, "Mars", "Venus", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Mars",
+        "Venus",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     ME = precompute_legs(
-        bodies, elapsed_days, "Mars", "Earth", max_revs, topk_ga, num_workers
+        bodies,
+        elapsed_days,
+        "Mars",
+        "Earth",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
     )
     MM = precompute_legs(
-        bodies, elapsed_days, "Mars", "Mars", max_revs, topk_ga, num_workers
-    )  # optional (usually skip)
+        bodies,
+        elapsed_days,
+        "Mars",
+        "Mars",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
+    )
     VV = precompute_legs(
-        bodies, elapsed_days, "Venus", "Venus", max_revs, topk_ga, num_workers
-    )  # optional (usually skip)
+        bodies,
+        elapsed_days,
+        "Venus",
+        "Venus",
+        max_revs,
+        topk_ga,
+        num_workers,
+        max_tof_days,
+    )
     print("Finished Lambert leg generation. Building trajectory combinations...")
 
     stored = []  # list of full trajectory dicts
@@ -332,6 +443,8 @@ def calculate_trajectories(
     # ----------------------------
     for i in range(len(elapsed_days)):
         for leg in EJ_direct[i]:
+            if leg["tof_days"] > max_tof_days:
+                continue
             traj = {
                 "type": "Direct",
                 "sequence": ["Earth", "Jupiter"],
@@ -366,6 +479,8 @@ def calculate_trajectories(
 
                 # next legs must depart at the same epoch k
                 for leg2 in L2[k]:
+                    if leg1["tof_days"] + leg2["tof_days"] > max_tof_days:
+                        continue
                     j = leg2["i_arr"]
                     vinf_out_vec_kms = (
                         leg2["v1_aud"] - bodies[X]["vel"][k]
@@ -440,6 +555,8 @@ def calculate_trajectories(
                     ) * c.AU_PER_DAY_TO_KM_PER_S
 
                     for leg2 in L2[k]:
+                        if leg1["tof_days"] + leg2["tof_days"] > max_tof_days:
+                            continue
                         m = leg2["i_arr"]  # encounter at Y
 
                         vinf_out_X_vec = (
@@ -460,6 +577,11 @@ def calculate_trajectories(
                         ) * c.AU_PER_DAY_TO_KM_PER_S
 
                         for leg3 in L3[m]:
+                            if (
+                                leg1["tof_days"] + leg2["tof_days"] + leg3["tof_days"]
+                                > max_tof_days
+                            ):
+                                continue
                             j = leg3["i_arr"]
                             vinf_out_Y_vec = (
                                 leg3["v1_aud"] - bodies[Y]["vel"][m]
