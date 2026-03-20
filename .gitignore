@@ -1,0 +1,12 @@
+.DS_Store
+
+# Python cache/build artifacts
+__pycache__/
+.pycache/
+*.py[cod]
+
+# IDE settings
+.idea/
+
+# Generated outputs
+results/

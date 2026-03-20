@@ -100,6 +100,20 @@ The code uses:
 - lamberthub
 - ffmpeg
 
+## Setup
+
+The recommended setup is a conda environment because `lamberthub` pulls in `numba` and `llvmlite`, which have been more reliable to install this way on macOS.
+
+Create and activate the environment:
+
+```bash
+conda create -n orbital python=3.11 numpy scipy matplotlib astroquery numba llvmlite
+conda activate orbital
+pip install lamberthub
+```
+
+If you prefer, you can still use `requirements.txt` as a package reference, but the conda-based install above is the recommended path for this project.
+
 ## Running
 
 Run:
