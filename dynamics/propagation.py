@@ -1,3 +1,5 @@
+"""Stitched Sun-centered propagation for selected Lambert trajectories."""
+
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -5,8 +7,7 @@ import constants as c
 
 
 def twobody_sun_ode(t, y):
-    """Return the heliocentric 2-body state derivative in km and km/s."""
-    # y = [x,y,z,vx,vy,vz] in km and km/s
+    """Return the heliocentric two-body state derivative in km and km/s."""
     r = y[:3]
     v = y[3:]
     rnorm = np.linalg.norm(r)
@@ -15,7 +16,7 @@ def twobody_sun_ode(t, y):
 
 
 def _sample_counts_for_legs(legs, n_samples):
-    """Distribute total samples across Lambert legs while preserving endpoints."""
+    """Allocate a total sample budget across legs while preserving joins."""
     if n_samples < len(legs) + 1:
         raise ValueError(
             f"n_samples={n_samples} is too small for {len(legs)} Lambert legs"
@@ -23,7 +24,6 @@ def _sample_counts_for_legs(legs, n_samples):
 
     tof_days = np.array([leg["tof_days"] for leg in legs], dtype=float)
     total_tof_days = tof_days.sum()
-
     if total_tof_days <= 0.0:
         raise ValueError("Total time of flight must be positive")
 
@@ -31,7 +31,6 @@ def _sample_counts_for_legs(legs, n_samples):
         2, np.round(n_samples * tof_days / total_tof_days).astype(int)
     )
 
-    # Each stitched segment shares one endpoint with the previous segment.
     target_total = n_samples + len(legs) - 1
     diff = int(target_total - seg_samples.sum())
 
@@ -50,7 +49,7 @@ def _sample_counts_for_legs(legs, n_samples):
 
 
 def _propagate_lambert_leg(leg, epochs, bodies, n_samples):
-    """Propagate one Lambert leg from its departure body to its arrival body."""
+    """Propagate a single Lambert leg under Sun two-body dynamics."""
     i_dep = leg["i_dep"]
     i_arr = leg["i_arr"]
     t_dep = epochs[i_dep]
@@ -79,11 +78,24 @@ def _propagate_lambert_leg(leg, epochs, bodies, n_samples):
     return sol.t, sol.y[:3, :].T
 
 
+def _planet_tracks(best, epochs, bodies):
+    """Return planet position histories spanning the selected trajectory window."""
+    i0 = best["indices"][0]
+    iF = best["indices"][-1]
+    idxs = np.arange(i0, iF + 1)
+    return (
+        [epochs[k] for k in idxs],
+        bodies["Venus"]["pos"][idxs] * c.AU_KM,
+        bodies["Earth"]["pos"][idxs] * c.AU_KM,
+        bodies["Mars"]["pos"][idxs] * c.AU_KM,
+        bodies["Jupiter"]["pos"][idxs] * c.AU_KM,
+    )
+
+
 def propagate_best_trajectory(best, epochs, bodies, n_samples=500):
-    """Propagate the best direct, 1-GA, or 2-GA trajectory as stitched leg segments."""
+    """Propagate a best-found trajectory as stitched heliocentric leg segments."""
     legs = best["lambert_legs"]
     n_legs = len(legs)
-
     if n_legs not in (1, 2, 3):
         raise ValueError(f"Invalid number of lambert legs: {n_legs}")
 
@@ -91,22 +103,15 @@ def propagate_best_trajectory(best, epochs, bodies, n_samples=500):
     iF = best["indices"][-1]
     t0 = epochs[i0]
     tF = epochs[iF]
-
-    # Planet tracks (sample planet ephemeris at discrete indices between i0 and iF)
-    idxs = np.arange(i0, iF + 1)
-    venus_track = bodies["Venus"]["pos"][idxs] * c.AU_KM
-    earth_track = bodies["Earth"]["pos"][idxs] * c.AU_KM
-    mars_track = bodies["Mars"]["pos"][idxs] * c.AU_KM
-    jup_track = bodies["Jupiter"]["pos"][idxs] * c.AU_KM
-    times_track = [epochs[k] for k in idxs]
+    times_track, venus_track, earth_track, mars_track, jup_track = _planet_tracks(
+        best, epochs, bodies
+    )
 
     seg_samples = _sample_counts_for_legs(legs, n_samples)
-
     t_segments = []
     sc_segments = []
     elapsed_offset_s = 0.0
 
-    # Propagate each Lambert leg separately and stitch the position history together.
     for idx, (leg, leg_samples) in enumerate(zip(legs, seg_samples)):
         t_leg, sc_leg = _propagate_lambert_leg(leg, epochs, bodies, leg_samples)
         t_leg = t_leg + elapsed_offset_s
