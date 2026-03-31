@@ -351,11 +351,13 @@ def _build_flyby_summary(
     }
 
 
-def _attach_jupiter_capture(traj, arrival_leg, arrival_index, bodies):
+def _attach_jupiter_capture(traj, arrival_leg, arrival_index, bodies, capture_orbit=None):
     """Attach Jupiter arrival/capture metrics to a trajectory record."""
     v_sc_helio_kms = arrival_leg["v2_aud"] * c.AU_KM / c.DAY_S
     v_jup_helio_kms = bodies["Jupiter"]["vel"][arrival_index] * c.AU_KM / c.DAY_S
-    arrival_analysis = jc.compute_jupiter_capture(v_sc_helio_kms, v_jup_helio_kms)
+    arrival_analysis = jc.compute_jupiter_capture(
+        v_sc_helio_kms, v_jup_helio_kms, capture_orbit=capture_orbit
+    )
     traj["arrival_analysis"] = arrival_analysis
     traj["joi_delta_v_kms"] = arrival_analysis["joi_delta_v_kms"]
     traj["mission_total_cost_kms"] = (
@@ -398,7 +400,9 @@ def _body_pair_legs(
     return legs
 
 
-def _build_direct_trajectories(bodies, EJ_direct, elapsed_days, max_tof_days):
+def _build_direct_trajectories(
+    bodies, EJ_direct, elapsed_days, max_tof_days, capture_orbit=None
+):
     """Yield all feasible direct Earth-to-Jupiter trajectories."""
     for dep_index in range(len(elapsed_days)):
         for leg in EJ_direct[dep_index]:
@@ -414,10 +418,12 @@ def _build_direct_trajectories(bodies, EJ_direct, elapsed_days, max_tof_days):
                 "v2_aud": leg["v2_aud"],
                 "vinf_launch_kms": leg["vinf_dep_kms"],
                 "vinf_arrive_kms": leg["vinf_arr_kms"],
-            }, leg, leg["i_arr"], bodies)
+            }, leg, leg["i_arr"], bodies, capture_orbit=capture_orbit)
 
 
-def _build_one_assist_trajectories(bodies, elapsed_days, EV, EM, VJ, MJ, max_tof_days):
+def _build_one_assist_trajectories(
+    bodies, elapsed_days, EV, EM, VJ, MJ, max_tof_days, capture_orbit=None
+):
     """Yield all feasible one-gravity-assist trajectories."""
     first_legs = {"Venus": EV, "Mars": EM}
     second_legs = {"Venus": VJ, "Mars": MJ}
@@ -468,7 +474,7 @@ def _build_one_assist_trajectories(bodies, elapsed_days, EV, EM, VJ, MJ, max_tof
                         ],
                         "vinf_launch_kms": leg1["vinf_dep_kms"],
                         "vinf_arrive_kms": leg2["vinf_arr_kms"],
-                    }, leg2, arr_index, bodies)
+                    }, leg2, arr_index, bodies, capture_orbit=capture_orbit)
 
 
 def _build_two_assist_trajectories(
@@ -486,6 +492,7 @@ def _build_two_assist_trajectories(
     MM,
     VV,
     max_tof_days,
+    capture_orbit=None,
 ):
     """Yield all feasible two-gravity-assist trajectories."""
     first_legs = {"Venus": EV, "Mars": EM}
@@ -603,7 +610,7 @@ def _build_two_assist_trajectories(
                                 ],
                                 "vinf_launch_kms": leg1["vinf_dep_kms"],
                                 "vinf_arrive_kms": leg3["vinf_arr_kms"],
-                            }, leg3, arr_index, bodies)
+                            }, leg3, arr_index, bodies, capture_orbit=capture_orbit)
 
 
 def calculate_trajectories(
@@ -615,6 +622,7 @@ def calculate_trajectories(
     num_workers=None,
     max_years=10.0,
     ranked_limit=50,
+    capture_orbit=None,
 ):
     """Search direct, one-assist, and two-assist Earth-to-Jupiter trajectories."""
     max_tof_days = 365.25 * max_years
@@ -638,7 +646,7 @@ def calculate_trajectories(
 
     trajectory_sources = [
         _build_direct_trajectories(
-            bodies, legs["EJ_direct"], elapsed_days, max_tof_days
+            bodies, legs["EJ_direct"], elapsed_days, max_tof_days, capture_orbit
         ),
         _build_one_assist_trajectories(
             bodies,
@@ -648,6 +656,7 @@ def calculate_trajectories(
             legs["VJ"],
             legs["MJ"],
             max_tof_days,
+            capture_orbit,
         ),
         _build_two_assist_trajectories(
             bodies,
@@ -664,6 +673,7 @@ def calculate_trajectories(
             legs["MM"],
             legs["VV"],
             max_tof_days,
+            capture_orbit,
         ),
     ]
 

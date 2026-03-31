@@ -6,10 +6,9 @@ import multiprocessing as mp
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-
 from arrival import jupiter_capture as jc
 import constants as c
+import snapshot_io
 from search import lambert as ls
 from search import refinement
 from visualization import plots
@@ -102,6 +101,18 @@ def parse_args(argv=None):
         default=c.VINF_MATCH_ABS_KMS,
         help="Maximum allowed incoming/outgoing v_inf magnitude mismatch for unpowered flybys in km/s.",
     )
+    parser.add_argument(
+        "--joi-periapsis-rj",
+        type=float,
+        default=c.JOI_CAPTURE_PERIAPSIS_RJ,
+        help="Target Jupiter capture-orbit periapsis radius in Jupiter radii.",
+    )
+    parser.add_argument(
+        "--joi-apoapsis-rj",
+        type=float,
+        default=c.JOI_CAPTURE_APOAPSIS_RJ,
+        help="Target Jupiter capture-orbit apoapsis radius in Jupiter radii.",
+    )
 
     args = parser.parse_args(argv)
     refine_steps = refinement.parse_csv_ints(args.refine_steps)
@@ -130,6 +141,8 @@ def build_run_config(args):
         "h_min_km": args.h_min_km,
         "h_max_km": args.h_max_km,
         "vinf_match_abs_kms": args.vinf_match_abs_kms,
+        "joi_periapsis_rj": args.joi_periapsis_rj,
+        "joi_apoapsis_rj": args.joi_apoapsis_rj,
     }
 
 
@@ -160,30 +173,6 @@ def serialize_traj(traj, epochs):
     if "arrival_analysis" in traj:
         summary["arrival_analysis"] = traj["arrival_analysis"]
     return summary
-
-
-def _serialize_leg(leg):
-    """Convert one Lambert leg into JSON-friendly data."""
-    return {
-        "from": leg["from"],
-        "to": leg["to"],
-        "i_dep": leg["i_dep"],
-        "i_arr": leg["i_arr"],
-        "tof_days": leg["tof_days"],
-        "v1_aud": np.asarray(leg["v1_aud"], dtype=float).tolist(),
-        "v2_aud": np.asarray(leg["v2_aud"], dtype=float).tolist(),
-        "vinf_dep_kms": leg["vinf_dep_kms"],
-        "vinf_arr_kms": leg["vinf_arr_kms"],
-    }
-
-
-def serialize_snapshot_traj(traj, epochs):
-    """Convert a stored trajectory into a reusable snapshot record."""
-    snapshot = serialize_traj(traj, epochs)
-    snapshot["lambert_legs"] = [_serialize_leg(leg) for leg in traj["lambert_legs"]]
-    if "flyby" in traj:
-        snapshot["flyby"] = traj["flyby"]
-    return snapshot
 
 
 def _format_windows(level_summary):
@@ -279,62 +268,6 @@ def write_mission_design_report(output_dir, summary):
     (output_dir / "mission_design_report.md").write_text("\n".join(report_lines))
 
 
-def _snapshot_ephemeris_arrays(entry):
-    """Convert one best-entry ephemeris bundle into NPZ-ready arrays."""
-    arrays = {
-        "epochs_iso": np.array(
-            [epoch.isoformat() for epoch in entry["epochs"]], dtype="<U32"
-        )
-    }
-    for body_name, body in entry["bodies"].items():
-        body_slug = body_name.lower()
-        arrays[f"{body_slug}_pos_au"] = np.asarray(body["pos"], dtype=float)
-        arrays[f"{body_slug}_vel_au_per_day"] = np.asarray(body["vel"], dtype=float)
-    return arrays
-
-
-def write_trajectory_snapshot(output_dir, best_entries, summary):
-    """Write reusable trajectory and ephemeris snapshots for downstream analysis."""
-    snapshot_payload = {
-        "config": summary["config"],
-        "capture_model": summary["capture_model"],
-        "search_levels": summary["search_levels"],
-        "best_total": {
-            "window": refinement.serialize_window(best_entries["total"]["window"]),
-            "trajectory": serialize_snapshot_traj(
-                best_entries["total"]["traj"], best_entries["total"]["epochs"]
-            ),
-        },
-        "best_mission": {
-            "window": refinement.serialize_window(best_entries["mission"]["window"]),
-            "trajectory": serialize_snapshot_traj(
-                best_entries["mission"]["traj"], best_entries["mission"]["epochs"]
-            ),
-        },
-        "best_launch": {
-            "window": refinement.serialize_window(best_entries["launch"]["window"]),
-            "trajectory": serialize_snapshot_traj(
-                best_entries["launch"]["traj"], best_entries["launch"]["epochs"]
-            ),
-        },
-        "best_arrival": {
-            "window": refinement.serialize_window(best_entries["arrival"]["window"]),
-            "trajectory": serialize_snapshot_traj(
-                best_entries["arrival"]["traj"], best_entries["arrival"]["epochs"]
-            ),
-        },
-    }
-    (output_dir / "trajectory_ephemeris_snapshot.json").write_text(
-        json.dumps(snapshot_payload, indent=2)
-    )
-
-    ephemeris_arrays = {}
-    for label, entry in best_entries.items():
-        for name, values in _snapshot_ephemeris_arrays(entry).items():
-            ephemeris_arrays[f"{label}_{name}"] = values
-    np.savez_compressed(output_dir / "trajectory_ephemeris_snapshot.npz", **ephemeris_arrays)
-
-
 def _summary_payload(
     best_total_entry,
     best_mission_entry,
@@ -344,11 +277,12 @@ def _summary_payload(
     plot_result,
     window_info,
     run_config,
+    capture_orbit,
 ):
     """Assemble the JSON summary written into the run output folder."""
     return {
         "config": run_config,
-        "capture_model": jc.capture_model_summary(),
+        "capture_model": jc.capture_model_summary(capture_orbit),
         "search_levels": level_summaries,
         "final_plot_window": refinement.serialize_window(plot_result["window"]),
         "stored_trajectories_in_plot_window": len(plot_result["stored"]),
@@ -401,6 +335,9 @@ def run(args):
     c.H_MAX = args.h_max_km
     c.VINF_MATCH_ABS_KMS = args.vinf_match_abs_kms
     args.num_workers = ls.resolve_num_workers(args.num_workers)
+    args.capture_orbit = jc.build_capture_orbit(
+        args.joi_periapsis_rj, args.joi_apoapsis_rj
+    )
 
     run_config = build_run_config(args)
     output_dir = make_run_output_dir()
@@ -444,10 +381,11 @@ def run(args):
         plot_result,
         window_info,
         run_config,
+        args.capture_orbit,
     )
     (output_dir / "run_config.json").write_text(json.dumps(summary, indent=2))
     write_mission_design_report(output_dir, summary)
-    write_trajectory_snapshot(
+    snapshot_io.write_trajectory_snapshot(
         output_dir,
         {
             "total": best_total_entry,
@@ -456,6 +394,7 @@ def run(args):
             "arrival": best_arrival_entry,
         },
         summary,
+        serialize_traj,
     )
 
     if annotated_entries_by_class:

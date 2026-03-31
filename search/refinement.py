@@ -180,6 +180,7 @@ def run_search_window(args, window):
         args.num_workers,
         args.max_years,
         ranked_limit=ranked_limit,
+        capture_orbit=args.capture_orbit,
     )
     return {
         "window": window,

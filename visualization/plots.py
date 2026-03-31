@@ -15,7 +15,7 @@ PLANET_COLORS = {
     "Venus": "gold",
     "Earth": "blue",
     "Mars": "red",
-    "Jupiter": "orange",
+    "Jupiter": "chocolate",
 }
 
 PLOT_SPECS = [
@@ -62,7 +62,10 @@ def make_porkchop(stored, epochs, class_name, plot_type="launch"):
         else:
             raise ValueError(f"Invalid cost type: {plot_type}")
 
-        if np.isnan(grid[arrival_index, launch_index]) or cost < grid[arrival_index, launch_index]:
+        if (
+            np.isnan(grid[arrival_index, launch_index])
+            or cost < grid[arrival_index, launch_index]
+        ):
             grid[arrival_index, launch_index] = cost
 
     return grid
@@ -104,7 +107,9 @@ def build_plot(grid, epochs, title):
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     ax.yaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
 
-    launch_start, launch_end, arrival_start, arrival_end = _porkchop_bounds(grid, epochs)
+    launch_start, launch_end, arrival_start, arrival_end = _porkchop_bounds(
+        grid, epochs
+    )
     ax.set_xlim(mdates.date2num(launch_start), mdates.date2num(launch_end))
     ax.set_ylim(mdates.date2num(arrival_start), mdates.date2num(arrival_end))
     fig.autofmt_xdate()
@@ -200,7 +205,15 @@ def plot_annotated_porkchop(
         grid, epochs, window_end, "end"
     )
 
-    ax.plot(best_x, best_y, marker="*", markersize=12, markeredgecolor="black", markerfacecolor="red", zorder=5)
+    ax.plot(
+        best_x,
+        best_y,
+        marker="*",
+        markersize=12,
+        markeredgecolor="black",
+        markerfacecolor="red",
+        zorder=5,
+    )
     ax.annotate(
         f"Best\n$v_\\infty$={vinf_best:.2f} km/s",
         xy=(best_x, best_y),
@@ -255,6 +268,7 @@ def _plot_family(output_dir, epochs, stored, plot_type):
         outfile = output_dir / Path(f"porkchop_{plot_type}_{slug}.png")
         plot_porkchop(grid, epochs, title, outfile, plot_type)
 
+
 def make_plots(stored, epochs, output_dir: Path = Path("plots")):
     """Create all non-empty unannotated porkchop plot variants for the stored set."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -265,7 +279,9 @@ def make_plots(stored, epochs, output_dir: Path = Path("plots")):
 def make_annotated_plots(entries_by_class, output_dir: Path = Path("plots")):
     """Create annotated porkchops for the distinct winning trajectory classes."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    spec_by_class = {class_name: (slug, title) for class_name, slug, title in PLOT_SPECS}
+    spec_by_class = {
+        class_name: (slug, title) for class_name, slug, title in PLOT_SPECS
+    }
 
     for class_name, best_entry in entries_by_class.items():
         spec = spec_by_class.get(class_name)
@@ -279,16 +295,27 @@ def make_annotated_plots(entries_by_class, output_dir: Path = Path("plots")):
             "window_end": best_entry["window"]["stop"],
         }
         for plot_type in ["launch", "arrival", "total", "mission"]:
-            grid = make_porkchop(best_entry["stored"], best_entry["epochs"], class_name, plot_type)
+            grid = make_porkchop(
+                best_entry["stored"], best_entry["epochs"], class_name, plot_type
+            )
             if not _has_porkchop_data(grid):
                 continue
-            annotated_outfile = output_dir / Path(f"porkchop_{plot_type}_{slug}_annotated.png")
+            annotated_outfile = output_dir / Path(
+                f"porkchop_{plot_type}_{slug}_annotated.png"
+            )
             plot_annotated_porkchop(
-                grid, best_entry["epochs"], title, window_info, annotated_outfile, plot_type
+                grid,
+                best_entry["epochs"],
+                title,
+                window_info,
+                annotated_outfile,
+                plot_type,
             )
 
 
-def plot_spacecraft_traj(best, epochs, bodies, tag="total", output_dir: Path = Path("plots")):
+def plot_spacecraft_traj(
+    best, epochs, bodies, tag="total", output_dir: Path = Path("plots")
+):
     """Save a static XY plot and animation for one selected best trajectory."""
     output_dir.mkdir(parents=True, exist_ok=True)
     (
@@ -304,11 +331,30 @@ def plot_spacecraft_traj(best, epochs, bodies, tag="total", output_dir: Path = P
     ) = prop.propagate_best_trajectory(best, epochs, bodies, n_samples=800)
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    ax.plot(venus_track[:, 0], venus_track[:, 1], color=PLANET_COLORS["Venus"], label="Venus")
-    ax.plot(earth_track[:, 0], earth_track[:, 1], color=PLANET_COLORS["Earth"], label="Earth")
-    ax.plot(mars_track[:, 0], mars_track[:, 1], color=PLANET_COLORS["Mars"], label="Mars")
-    ax.plot(jup_track[:, 0], jup_track[:, 1], color=PLANET_COLORS["Jupiter"], label="Jupiter")
-    ax.plot(sc_track[:, 0], sc_track[:, 1], color="black", linestyle=":", label="SC path")
+    ax.plot(
+        venus_track[:, 0],
+        venus_track[:, 1],
+        color=PLANET_COLORS["Venus"],
+        label="Venus",
+    )
+    ax.plot(
+        earth_track[:, 0],
+        earth_track[:, 1],
+        color=PLANET_COLORS["Earth"],
+        label="Earth",
+    )
+    ax.plot(
+        mars_track[:, 0], mars_track[:, 1], color=PLANET_COLORS["Mars"], label="Mars"
+    )
+    ax.plot(
+        jup_track[:, 0],
+        jup_track[:, 1],
+        color=PLANET_COLORS["Jupiter"],
+        label="Jupiter",
+    )
+    ax.plot(
+        sc_track[:, 0], sc_track[:, 1], color="black", linestyle=":", label="SC path"
+    )
 
     body_tracks = {
         "Venus": venus_track,
@@ -318,8 +364,16 @@ def plot_spacecraft_traj(best, epochs, bodies, tag="total", output_dir: Path = P
     }
     seq_indices = [idx - best["indices"][0] for idx in best["indices"]]
 
-    ax.scatter(earth_track[0, 0], earth_track[0, 1], color=PLANET_COLORS["Earth"], marker="o", label="Dep")
-    for idx, (seq_idx, body_name) in enumerate(zip(seq_indices[1:-1], best["sequence"][1:-1])):
+    ax.scatter(
+        earth_track[0, 0],
+        earth_track[0, 1],
+        color=PLANET_COLORS["Earth"],
+        marker="o",
+        label="Dep",
+    )
+    for idx, (seq_idx, body_name) in enumerate(
+        zip(seq_indices[1:-1], best["sequence"][1:-1])
+    ):
         body_track = body_tracks[body_name]
         ax.scatter(
             body_track[seq_idx, 0],
@@ -329,14 +383,24 @@ def plot_spacecraft_traj(best, epochs, bodies, tag="total", output_dir: Path = P
             s=60,
             label="GA" if idx == 0 else None,
         )
-    ax.scatter(jup_track[-1, 0], jup_track[-1, 1], color=PLANET_COLORS["Jupiter"], marker="o", label="Arr")
-    ax.scatter(sc_track[-1, 0], sc_track[-1, 1], color="black", marker=">", s=80, label="SC")
+    ax.scatter(
+        jup_track[-1, 0],
+        jup_track[-1, 1],
+        color=PLANET_COLORS["Jupiter"],
+        marker="o",
+        label="Arr",
+    )
+    ax.scatter(
+        sc_track[-1, 0], sc_track[-1, 1], color="black", marker=">", s=80, label="SC"
+    )
 
     ax.axis("equal")
     ax.set_xlabel("x (km)")
     ax.set_ylabel("y (km)")
     ax.set_title(f"Best trajectory motion ({best['type']}, {t0.date()} to {tF.date()})")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, fontsize=8)
+    ax.legend(
+        loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, fontsize=8
+    )
     fig.tight_layout()
     fig.savefig(output_dir / f"trajectory_plot_{tag}.png", dpi=200)
     plt.close(fig)
@@ -370,8 +434,24 @@ def animate_trajectory(
     ax.set_ylabel("y (km)")
     ax.set_title("Best trajectory animation (heliocentric XY)")
 
-    all_x = np.hstack([venus_track[:, 0], earth_track[:, 0], mars_track[:, 0], jup_track[:, 0], sc_track[:, 0]])
-    all_y = np.hstack([venus_track[:, 1], earth_track[:, 1], mars_track[:, 1], jup_track[:, 1], sc_track[:, 1]])
+    all_x = np.hstack(
+        [
+            venus_track[:, 0],
+            earth_track[:, 0],
+            mars_track[:, 0],
+            jup_track[:, 0],
+            sc_track[:, 0],
+        ]
+    )
+    all_y = np.hstack(
+        [
+            venus_track[:, 1],
+            earth_track[:, 1],
+            mars_track[:, 1],
+            jup_track[:, 1],
+            sc_track[:, 1],
+        ]
+    )
     pad = 0.05
     xmin, xmax = all_x.min(), all_x.max()
     ymin, ymax = all_y.min(), all_y.max()
@@ -390,7 +470,9 @@ def animate_trajectory(
     (jup_pt,) = ax.plot([], [], marker="o", color=PLANET_COLORS["Jupiter"])
     (sc_pt,) = ax.plot([], [], marker=">", color="black")
 
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, fontsize=8)
+    ax.legend(
+        loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, fontsize=8
+    )
 
     n_frames = min(300, sc_track.shape[0])
     frame_idx = np.linspace(0, sc_track.shape[0] - 1, n_frames).astype(int)
@@ -430,12 +512,22 @@ def animate_trajectory(
         """Advance all body and spacecraft artists to one animation frame."""
         sc_idx = frame_idx[frame_number]
         sc_time_s = t_sc[sc_idx]
-        planet_idx = int(round(np.interp(sc_time_s, planet_time_s, np.arange(len(times_track)))))
+        planet_idx = int(
+            round(np.interp(sc_time_s, planet_time_s, np.arange(len(times_track))))
+        )
 
-        venus_line.set_data(venus_track[: planet_idx + 1, 0], venus_track[: planet_idx + 1, 1])
-        earth_line.set_data(earth_track[: planet_idx + 1, 0], earth_track[: planet_idx + 1, 1])
-        mars_line.set_data(mars_track[: planet_idx + 1, 0], mars_track[: planet_idx + 1, 1])
-        jup_line.set_data(jup_track[: planet_idx + 1, 0], jup_track[: planet_idx + 1, 1])
+        venus_line.set_data(
+            venus_track[: planet_idx + 1, 0], venus_track[: planet_idx + 1, 1]
+        )
+        earth_line.set_data(
+            earth_track[: planet_idx + 1, 0], earth_track[: planet_idx + 1, 1]
+        )
+        mars_line.set_data(
+            mars_track[: planet_idx + 1, 0], mars_track[: planet_idx + 1, 1]
+        )
+        jup_line.set_data(
+            jup_track[: planet_idx + 1, 0], jup_track[: planet_idx + 1, 1]
+        )
         sc_line.set_data(sc_track[: sc_idx + 1, 0], sc_track[: sc_idx + 1, 1])
 
         venus_pt.set_data([venus_track[planet_idx, 0]], [venus_track[planet_idx, 1]])
@@ -457,6 +549,8 @@ def animate_trajectory(
             sc_pt,
         )
 
-    ani = FuncAnimation(fig, update, frames=n_frames, init_func=init, blit=True, interval=30)
+    ani = FuncAnimation(
+        fig, update, frames=n_frames, init_func=init, blit=True, interval=30
+    )
     ani.save(outfile, writer="ffmpeg", fps=20)
     plt.close(fig)

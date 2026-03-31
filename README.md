@@ -9,9 +9,12 @@ The code currently evaluates:
 
 Code fetches planetary ephemerides from JPL Horizons, searches a launch/arrival grid, filters gravity assists using an unpowered flyby feasibility check, and then produces porkchop plots & propagated trajectory plots/animations for the best solutions.
 
-The current implementation also models an impulsive Jupiter orbit insertion into a fixed elliptical capture orbit:
+The current implementation also models an impulsive Jupiter orbit insertion into an elliptical capture orbit that defaults to:
 - periapsis = `1.1 Rj`
 - apoapsis = `115 Rj`
+
+A separate downstream script can now re-run the Jupiter capture analysis from a saved snapshot using a configurable target capture orbit, without rerunning the Lambert search.
+That downstream analysis now also produces a local Jupiter-centered capture plot and animation, with the Sun direction shown when the sibling NPZ snapshot is available.
 
 The search now supports adaptive refinement:
 - a coarse global search over the full date span
@@ -41,12 +44,15 @@ Units:
 ## Key Files
 
 - `run.py`: main entry point
+- `jupiter_capture_from_snapshot.py`: standalone JOI/capture reanalysis from a saved snapshot
 - `ephemeris.py`: JPL Horizons ephemeris loading
 - `search/lambert.py`: Lambert leg generation and trajectory assembly
 - `search/refinement.py`: adaptive coarse-to-fine search logic
 - `dynamics/propagation.py`: stitched Sun 2-body propagation
 - `visualization/plots.py`: porkchop plots, trajectory plots, and animations
+- `visualization/capture.py`: Jupiter-centered JOI/capture plots and animations
 - `constants.py`: physical constants and flyby limits
+- `snapshot_io.py`: shared snapshot serialization/loading helpers
 
 ## Outputs
 
@@ -63,6 +69,9 @@ That folder contains:
 - porkchop plots
 - trajectory plots
 - trajectory animations
+- optional downstream capture reanalysis products such as `jupiter_capture_mission.json`
+- optional Jupiter-centered capture products such as `jupiter_capture_plot_mission.png`
+- optional Jupiter-centered capture animations such as `jupiter_capture_animation_mission.mp4`
 
 `run_config.json` and `mission_design_report.md` now also include the fixed Jupiter capture-orbit definition plus JOI/capture details such as arrival `v_inf`, JOI delta-v, and capture-orbit periapsis information.
 
@@ -100,6 +109,8 @@ Flyby-screening arguments:
 - `--h-min-km`: minimum flyby altitude in km
 - `--h-max-km`: maximum flyby altitude in km
 - `--vinf-match-abs-kms`: allowed incoming/outgoing `v_inf` magnitude mismatch in km/s
+- `--joi-periapsis-rj`: target Jupiter capture-orbit periapsis radius in Jupiter radii, default `1.1`
+- `--joi-apoapsis-rj`: target Jupiter capture-orbit apoapsis radius in Jupiter radii, default `115`
 
 Annotated porkchop arguments:
 - `--annotate`: enable annotated porkchop plots
@@ -144,7 +155,33 @@ Run:
 python3 run.py
 ```
 
-`run.py` is the single user-facing entry point. It handles argument parsing, multiprocessing setup, the adaptive search workflow, and output generation.
+`run.py` is the main search entry point. It handles argument parsing, multiprocessing setup, the adaptive search workflow, and output generation.
+
+By default, both `run.py` and `jupiter_capture_from_snapshot.py` use a Jupiter capture orbit of `1.1 Rj x 115 Rj`. Both entry points let you override that orbit if you already know the target capture geometry you want to analyze.
+
+For downstream Jupiter-capture-only work from a saved snapshot:
+
+```bash
+python3 jupiter_capture_from_snapshot.py results/<run>/trajectory_ephemeris_snapshot.json
+```
+
+Example with a different target capture orbit and a different saved best trajectory:
+
+```bash
+python3 jupiter_capture_from_snapshot.py \
+  results/<run>/trajectory_ephemeris_snapshot.json \
+  --best arrival \
+  --periapsis-rj 1.2 \
+  --apoapsis-rj 80
+```
+
+That script writes:
+- `jupiter_capture_<best>.json`
+- `jupiter_capture_<best>.md`
+- `jupiter_capture_plot_<best>.png`
+- `jupiter_capture_animation_<best>.mp4`
+
+The Jupiter-centered plot and animation are representative planar capture views derived from the saved arrival `v_inf` and target capture orbit. When the sibling NPZ snapshot is present, the local plot also shows the Jupiter-to-Sun direction from the saved arrival ephemeris and orients the approximate capture ellipse with periapsis Sunward and apoapsis anti-Sunward by convention.
 
 Example with custom search settings:
 
@@ -174,13 +211,20 @@ This is a screening model, not a full patched-conic mission design tool.
 Jupiter arrival is currently modeled as:
 - a hyperbolic arrival defined by the final Lambert-leg Jupiter-relative `v_inf`
 - an impulsive JOI burn at periapsis
-- capture into a fixed elliptical orbit with periapsis `1.1 Rj` and apoapsis `115 Rj` (based on JUNO spacecraft orbit)
+- capture into an elliptical orbit with default periapsis `1.1 Rj` and default apoapsis `115 Rj` (based on JUNO spacecraft orbit)
 
 The code reports both:
 - arrival `v_inf`
 - JOI delta-v
 
 and uses `launch v_inf + JOI delta-v` as a first-class mission metric alongside the legacy `v_inf` metrics.
+
+The search pipeline uses that default capture orbit for mission ranking unless you override it with `--joi-periapsis-rj` and `--joi-apoapsis-rj`. You can also re-evaluate the same saved arrival state against a different target Jupiter orbit with `jupiter_capture_from_snapshot.py`.
+
+The downstream Jupiter-centered capture visualization is intentionally approximate:
+- it is derived from the saved arrival `v_inf` vector and target capture orbit, not a full patched-conic arrival solve
+- the Sun marker is taken from Jupiter's saved heliocentric arrival position when `trajectory_ephemeris_snapshot.npz` is available
+- the displayed capture ellipse is oriented by convention so periapsis is Sunward and apoapsis is anti-Sunward
 
 ## Notes
 
