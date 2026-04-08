@@ -303,17 +303,6 @@ def _summary_payload(
     }
 
 
-def _best_plot_result(final_results):
-    """Pick the refined search window that should drive final plotting products."""
-    final_results_with_solutions = [
-        result for result in final_results if result["best_by_metric"]["total"] is not None
-    ]
-    return min(
-        final_results_with_solutions,
-        key=lambda result: refinement.traj_total_vinf(result["best_by_metric"]["total"]),
-    )
-
-
 def _representative_entries_by_class(best_by_metric):
     """Choose one winning best-entry representative for each final trajectory class."""
     entries_by_class = {}
@@ -360,7 +349,10 @@ def run(args):
     if best_total_entry is None:
         raise RuntimeError("No trajectories were found in the searched windows.")
 
-    plot_result = _best_plot_result(final_results)
+    plot_result = {
+        "window": best_total_entry["window"],
+        "stored": best_total_entry["stored"],
+    }
     window_info = refinement.make_window_info(best_total_entry) if args.annotate else None
     annotated_entries_by_class = (
         _representative_entries_by_class(best_by_metric) if args.annotate else {}

@@ -204,6 +204,27 @@ def serialize_best_entry(best_entry, serialize_traj_fn):
     }
 
 
+def pick_better_best_entry(current_entry, candidate_entry, key):
+    """Compare two stored best-entry bundles for one ranking metric."""
+    if candidate_entry is None:
+        return current_entry
+    if current_entry is None:
+        return candidate_entry
+
+    current_traj = current_entry["traj"]
+    candidate_traj = candidate_entry["traj"]
+    if key == "launch":
+        is_better = candidate_traj["vinf_launch_kms"] < current_traj["vinf_launch_kms"]
+    elif key == "arrival":
+        is_better = candidate_traj["vinf_arrive_kms"] < current_traj["vinf_arrive_kms"]
+    elif key == "mission":
+        is_better = traj_mission_cost(candidate_traj) < traj_mission_cost(current_traj)
+    else:
+        is_better = traj_total_vinf(candidate_traj) < traj_total_vinf(current_traj)
+
+    return candidate_entry if is_better else current_entry
+
+
 def execute_adaptive_search(args, serialize_traj_fn, on_level_complete=None):
     """Run the full coarse-to-fine refinement workflow across all search levels."""
     global_start = datetime.strptime(args.start, "%Y-%m-%d")
@@ -219,6 +240,7 @@ def execute_adaptive_search(args, serialize_traj_fn, on_level_complete=None):
     levels = [args.step] + args.refine_steps
     level_summaries = []
     final_results = []
+    global_best = {"launch": None, "arrival": None, "total": None, "mission": None}
 
     for level_index, level_step in enumerate(levels):
         print(
@@ -282,12 +304,17 @@ def execute_adaptive_search(args, serialize_traj_fn, on_level_complete=None):
             }
         )
 
+        for key in global_best:
+            global_best[key] = pick_better_best_entry(
+                global_best[key], aggregate_best[key], key
+            )
+
         if on_level_complete is not None:
             on_level_complete(level_index, level_results, aggregate_best)
 
         if level_index == len(levels) - 1:
             final_results = level_results
-            final_best = aggregate_best
+            final_best = global_best
             break
 
         next_step = levels[level_index + 1]
@@ -302,7 +329,7 @@ def execute_adaptive_search(args, serialize_traj_fn, on_level_complete=None):
         if not windows:
             print("No viable refinement corridors found; stopping at current level.")
             final_results = level_results
-            final_best = aggregate_best
+            final_best = global_best
             break
 
     return final_results, final_best, level_summaries
