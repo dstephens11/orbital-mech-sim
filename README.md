@@ -45,6 +45,7 @@ Units:
 
 - `run.py`: main entry point
 - `jupiter_capture_from_snapshot.py`: standalone JOI/capture reanalysis from a saved snapshot
+- `delta_v_budget.py`: standalone mission delta-v budgeting from a saved results folder or snapshot
 - `ephemeris.py`: JPL Horizons ephemeris loading
 - `search/lambert.py`: Lambert leg generation and trajectory assembly
 - `search/refinement.py`: adaptive coarse-to-fine search logic
@@ -70,6 +71,7 @@ That folder contains:
 - trajectory plots
 - trajectory animations
 - optional downstream capture reanalysis products such as `jupiter_capture_mission.json`
+- optional downstream mission budget products such as `delta_v_budget_mission.json`
 - optional Jupiter-centered capture products such as `jupiter_capture_plot_mission.png`
 - optional Jupiter-centered capture animations such as `jupiter_capture_animation_mission.mp4`
 
@@ -183,6 +185,33 @@ That script writes:
 
 The Jupiter-centered plot and animation are representative planar capture views derived from the saved arrival `v_inf` and target capture orbit. When the sibling NPZ snapshot is present, the local plot also shows the Jupiter-to-Sun direction from the saved arrival ephemeris and orients the approximate capture ellipse with periapsis Sunward and apoapsis anti-Sunward by convention.
 
+For downstream mission delta-v budgeting from the latest results folder:
+
+```bash
+python3 delta_v_budget.py
+```
+
+Example with an explicit results folder and custom budget assumptions:
+
+```bash
+python3 delta_v_budget.py results/<run> \
+  --best mission \
+  --margin-pct 15 \
+  --post-launch-tcm-ms 40 \
+  --pre-flyby-tcm-ms 20 \
+  --jupiter-cruise-tcm-ms-per-year 15 \
+  --jupiter-ops-years 2.0 \
+  --stationkeeping-ms-per-year 20
+```
+
+That script writes:
+- `delta_v_budget_<best>.json`
+- `delta_v_budget_<best>.md`
+
+The budget uses the saved launch `v_inf` and JOI values from the selected trajectory, then layers configurable planning allowances for post-launch corrections, flyby cleanup, Jupiter-leg cruise corrections, post-JOI cleanup, Jupiter-orbit operations, and an end-of-mission disposal burn, all with one flat configurable margin percentage.
+All outputs from `delta_v_budget.py` are reported in `m/s`.
+The launch row now uses a simple patched-conic Earth departure from a circular parking orbit, and the selected-trajectory summary also reports launch `C3` and required escape-burn delta-v.
+
 Example with custom search settings:
 
 ```bash
@@ -205,6 +234,17 @@ Gravity assists are currently modeled as:
 - periapsis altitude constrained by `H_MIN` and `H_MAX` in `constants.py`
 
 This is a screening model, not a full patched-conic mission design tool.
+
+## Current Launch Model
+
+Earth departure is currently modeled as:
+- a simple patched-conic departure from a circular `200 km` parking orbit
+- launch from Cape Canaveral latitude
+- launch `C3 = v_inf^2`
+- required hyperbolic escape-burn delta-v from parking orbit
+- Earth-rotation benefit reported separately as an ideal launch-site assist term
+
+This is more realistic than using heliocentric departure `v_inf` alone, but it is still not a full ascent or launcher-performance model.
 
 ## Current Jupiter Capture Model
 

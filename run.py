@@ -6,6 +6,7 @@ import multiprocessing as mp
 from datetime import datetime
 from pathlib import Path
 
+from arrival import earth_departure as ed
 from arrival import jupiter_capture as jc
 import constants as c
 import snapshot_io
@@ -26,11 +27,16 @@ def print_solution_summary(label, traj, epochs):
     total_tof_days = sum(traj["tof_days"])
     joi_delta_v_kms = traj.get("joi_delta_v_kms")
     mission_total_cost_kms = traj.get("mission_total_cost_kms")
+    launch_analysis = ed.compute_earth_departure(traj["vinf_launch_kms"])
     print(f"{label}:")
     print(
         f"  type = {traj['type']}, launch = {traj['vinf_launch_kms']:.3f} km/s, "
         f"arrival = {traj['vinf_arrive_kms']:.3f} km/s, total = {total_vinf:.3f} km/s, "
         f"TOF = {total_tof_days:.1f} days"
+    )
+    print(
+        f"  launch C3 = {launch_analysis['c3_km2_s2']:.3f} km^2/s^2, "
+        f"escape burn = {launch_analysis['escape_burn_delta_v_kms']:.3f} km/s"
     )
     if joi_delta_v_kms is not None and mission_total_cost_kms is not None:
         print(
@@ -156,6 +162,7 @@ def make_run_output_dir():
 
 def serialize_traj(traj, epochs):
     """Convert a trajectory record into JSON-friendly summary data."""
+    launch_analysis = ed.compute_earth_departure(traj["vinf_launch_kms"])
     summary = {
         "type": traj["type"],
         "sequence": traj["sequence"],
@@ -165,6 +172,7 @@ def serialize_traj(traj, epochs):
         "vinf_launch_kms": traj["vinf_launch_kms"],
         "vinf_arrive_kms": traj["vinf_arrive_kms"],
         "vinf_total_kms": traj["vinf_launch_kms"] + traj["vinf_arrive_kms"],
+        "launch_analysis": launch_analysis,
     }
     if "joi_delta_v_kms" in traj:
         summary["joi_delta_v_kms"] = traj["joi_delta_v_kms"]
@@ -201,6 +209,19 @@ def _format_trajectory_section(title, traj_summary):
         f"- Arrival v_inf (km/s): {traj_summary['vinf_arrive_kms']:.3f}",
         f"- Total v_inf (km/s): {traj_summary['vinf_total_kms']:.3f}",
     ]
+    launch_analysis = traj_summary.get("launch_analysis")
+    if launch_analysis:
+        lines.extend(
+            [
+                f"- Launch C3 (km^2/s^2): {launch_analysis['c3_km2_s2']:.3f}",
+                f"- Parking orbit altitude (km): {launch_analysis['parking_altitude_km']:.1f}",
+                f"- Launch site: {launch_analysis['launch_site']}",
+                f"- Ideal Earth-rotation assist (km/s): {launch_analysis['earth_rotation_benefit_kms']:.3f}",
+                f"- Parking-orbit circular speed (km/s): {launch_analysis['parking_circular_speed_kms']:.3f}",
+                f"- Hyperbolic perigee speed (km/s): {launch_analysis['hyperbolic_perigee_speed_kms']:.3f}",
+                f"- Required escape burn delta-v (km/s): {launch_analysis['escape_burn_delta_v_kms']:.3f}",
+            ]
+        )
     if "joi_delta_v_kms" in traj_summary:
         lines.extend(
             [

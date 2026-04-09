@@ -10,6 +10,20 @@ import constants as c
 from visualization.plots import PLANET_COLORS
 
 
+def _to_rj(values_km):
+    """Convert one position or track from kilometers to Jupiter radii."""
+    return np.asarray(values_km, dtype=float) / c.R_JUPITER
+
+
+def _unit_vector(vector_xy):
+    """Return a normalized 2D direction, or zeros if the input is degenerate."""
+    vector_xy = np.asarray(vector_xy, dtype=float)
+    norm = np.linalg.norm(vector_xy)
+    if norm <= 0.0:
+        return np.zeros(2, dtype=float)
+    return vector_xy / norm
+
+
 def _rotate_track(track_xy, angle_rad):
     """Rotate a 2D track by a fixed angle."""
     rotation = np.array(
@@ -124,11 +138,7 @@ def _local_sun_frame(sun_direction_xy_km=None):
     else:
         direction = np.asarray(sun_direction_xy_km, dtype=float)
         norm = np.linalg.norm(direction)
-        x_hat = (
-            np.array([0.0, 1.0], dtype=float)
-            if norm <= 0.0
-            else direction / norm
-        )
+        x_hat = np.array([0.0, 1.0], dtype=float) if norm <= 0.0 else direction / norm
     y_hat = np.array([-x_hat[1], x_hat[0]], dtype=float)
     return x_hat, y_hat
 
@@ -193,6 +203,211 @@ def _sun_marker_position(sun_direction_xy_km, limit_km):
     return direction / norm * (0.88 * limit_km)
 
 
+def _velocity_arrow_scale(limit_rj, arrival_analysis):
+    """Choose a readable arrow scale for local speed vectors."""
+    speeds = np.array(
+        [
+            float(arrival_analysis["arrival_vinf_kms"]),
+            float(arrival_analysis["hyperbolic_periapsis_speed_kms"]),
+            float(arrival_analysis["capture_periapsis_speed_kms"]),
+        ],
+        dtype=float,
+    )
+    max_speed = float(np.max(speeds))
+    if max_speed <= 0.0:
+        return 0.0
+    return 0.18 * limit_rj / max_speed
+
+
+def _clip_point_to_frame(point_xy, limit_rj, margin_frac=0.08):
+    """Keep annotation anchors inside the visible frame with a fixed margin."""
+    margin_rj = margin_frac * limit_rj
+    lower = -limit_rj + margin_rj
+    upper = limit_rj - margin_rj
+    point_xy = np.asarray(point_xy, dtype=float)
+    return np.array(
+        [
+            np.clip(point_xy[0], lower, upper),
+            np.clip(point_xy[1], lower, upper),
+        ],
+        dtype=float,
+    )
+
+
+def _text_alignment_for_direction(direction_xy):
+    """Choose text alignment based on the direction from the annotated geometry."""
+    direction_xy = _unit_vector(direction_xy)
+    ha = "left" if direction_xy[0] >= 0.0 else "right"
+    va = "bottom" if direction_xy[1] >= 0.0 else "top"
+    return ha, va
+
+
+def _label_position(
+    anchor_xy, direction_xy, limit_rj, base_offset_frac=0.1, tangent_bias_xy=None
+):
+    """Place a label away from the anchor using a preferred quadrant and frame clipping."""
+    direction_xy = _unit_vector(direction_xy)
+    if np.linalg.norm(direction_xy) <= 0.0:
+        direction_xy = np.array([1.0, 1.0], dtype=float) / np.sqrt(2.0)
+
+    offset_xy = base_offset_frac * limit_rj * direction_xy
+    if tangent_bias_xy is not None:
+        offset_xy = offset_xy + 0.04 * limit_rj * _unit_vector(tangent_bias_xy)
+
+    label_xy = _clip_point_to_frame(anchor_xy + offset_xy, limit_rj)
+    ha, va = _text_alignment_for_direction(direction_xy)
+    return label_xy, ha, va
+
+
+def _add_capture_annotations(ax, arrival_analysis, tracks_rj, limit_rj):
+    """Overlay the main arrival and JOI geometry cues on a capture plot."""
+    periapsis_xy = np.asarray(tracks_rj["capture_track"][0], dtype=float)
+    arrival_start_xy = np.asarray(tracks_rj["hyperbola_track"][0], dtype=float)
+    rp_rj = float(arrival_analysis["capture_orbit"]["periapsis_radius_rj"])
+    v_inf_kms = float(arrival_analysis["arrival_vinf_kms"])
+    v_peri_hyp_kms = float(arrival_analysis["hyperbolic_periapsis_speed_kms"])
+    v_peri_cap_kms = float(arrival_analysis["capture_periapsis_speed_kms"])
+    joi_delta_v_kms = float(arrival_analysis["joi_delta_v_kms"])
+
+    approach_hat = _unit_vector(
+        tracks_rj["hyperbola_track"][1] - tracks_rj["hyperbola_track"][0]
+    )
+    tangent_hat = _unit_vector(
+        tracks_rj["capture_track"][1] - tracks_rj["capture_track"][0]
+    )
+    if np.linalg.norm(approach_hat) <= 0.0:
+        approach_hat = _unit_vector(periapsis_xy - arrival_start_xy)
+    if np.linalg.norm(tangent_hat) <= 0.0:
+        tangent_hat = _unit_vector(
+            np.array([-periapsis_xy[1], periapsis_xy[0]], dtype=float)
+        )
+    normal_hat = _unit_vector(np.array([-tangent_hat[1], tangent_hat[0]], dtype=float))
+    radial_normal_hat = _unit_vector(
+        np.array([-periapsis_xy[1], periapsis_xy[0]], dtype=float)
+    )
+
+    arrow_scale = _velocity_arrow_scale(limit_rj, arrival_analysis)
+
+    ax.plot(
+        [0.0, periapsis_xy[0]],
+        [0.0, periapsis_xy[1]],
+        color="gray",
+        linestyle=":",
+        linewidth=1.2,
+    )
+    radius_label_xy, radius_ha, radius_va = _label_position(
+        0.42 * periapsis_xy,
+        radial_normal_hat + 0.35 * _unit_vector(periapsis_xy),
+        limit_rj,
+        base_offset_frac=0.12,
+    )
+    ax.text(
+        radius_label_xy[0],
+        radius_label_xy[1],
+        f"r_periapse = {rp_rj:.2f} Rj",
+        color="dimgray",
+        fontsize=9,
+        ha=radius_ha,
+        va=radius_va,
+        bbox=dict(boxstyle="round,pad=0.28", fc="white", ec="none", alpha=0.9),
+    )
+
+    vinf_length_rj = max(0.12 * limit_rj, v_inf_kms * arrow_scale)
+    vinf_tip_xy = arrival_start_xy + approach_hat * vinf_length_rj
+    ax.annotate(
+        "",
+        xy=vinf_tip_xy,
+        xytext=arrival_start_xy,
+        arrowprops=dict(arrowstyle="->", color="black", linewidth=1.8),
+    )
+    vinf_label_xy, vinf_ha, vinf_va = _label_position(
+        vinf_tip_xy,
+        normal_hat + 0.55 * approach_hat,
+        limit_rj,
+        base_offset_frac=0.12,
+        tangent_bias_xy=approach_hat,
+    )
+    ax.text(
+        vinf_label_xy[0],
+        vinf_label_xy[1],
+        f"v_inf = {v_inf_kms:.2f} km/s",
+        color="black",
+        fontsize=9,
+        ha=vinf_ha,
+        va=vinf_va,
+        bbox=dict(boxstyle="round,pad=0.28", fc="white", ec="none", alpha=0.9),
+    )
+
+    hyp_tip_xy = periapsis_xy + tangent_hat * (v_peri_hyp_kms * arrow_scale)
+    cap_tip_xy = periapsis_xy + tangent_hat * (v_peri_cap_kms * arrow_scale)
+
+    ax.annotate(
+        "",
+        xy=hyp_tip_xy,
+        xytext=periapsis_xy,
+        arrowprops=dict(arrowstyle="->", color="black", linewidth=1.8),
+    )
+    ax.annotate(
+        "",
+        xy=cap_tip_xy,
+        xytext=periapsis_xy,
+        arrowprops=dict(arrowstyle="->", color="teal", linewidth=1.8),
+    )
+    ax.annotate(
+        "",
+        xy=hyp_tip_xy,
+        xytext=cap_tip_xy,
+        arrowprops=dict(arrowstyle="<->", color="crimson", linewidth=1.6),
+    )
+
+    pre_label_xy, pre_ha, pre_va = _label_position(
+        hyp_tip_xy,
+        normal_hat + 0.45 * tangent_hat,
+        limit_rj,
+        base_offset_frac=0.14,
+        tangent_bias_xy=tangent_hat,
+    )
+    post_label_xy, post_ha, post_va = _label_position(
+        cap_tip_xy,
+        -normal_hat + 0.6 * tangent_hat,
+        limit_rj,
+        base_offset_frac=0.16,
+        tangent_bias_xy=tangent_hat,
+    )
+    dv_label_xy, dv_ha, dv_va = _label_position(
+        0.5 * (hyp_tip_xy + cap_tip_xy),
+        -normal_hat + 0.25 * tangent_hat,
+        limit_rj,
+        base_offset_frac=0.2,
+    )
+    ax.text(
+        dv_label_xy[0],
+        dv_label_xy[1],
+        f"JOI delta-v = {joi_delta_v_kms:.2f} km/s",
+        color="crimson",
+        fontsize=9,
+        ha=dv_ha,
+        va=dv_va,
+        bbox=dict(boxstyle="round,pad=0.28", fc="white", ec="none", alpha=0.92),
+    )
+
+
+def _build_animation_schedule(t_hyp_rel_s, t_cap_s):
+    """Create explicit animation phases so the JOI event has time to read."""
+    schedule = []
+
+    for time_s in np.linspace(t_hyp_rel_s[0], 0.0, 120, endpoint=True):
+        schedule.append(("approach", float(time_s)))
+    for _ in range(24):
+        schedule.append(("periapsis_hold", 0.0))
+    for _ in range(24):
+        schedule.append(("burn", 0.0))
+    for time_s in np.linspace(0.0, t_cap_s[-1], 192, endpoint=True):
+        schedule.append(("capture", float(time_s)))
+
+    return schedule
+
+
 def plot_jupiter_capture(
     arrival_analysis,
     tag="mission",
@@ -207,33 +422,39 @@ def plot_jupiter_capture(
     tracks = _capture_tracks(
         arrival_analysis, n_orbits=n_orbits, sun_direction_xy_km=sun_direction_xy_km
     )
-    limit_km = _capture_axis_limit_km(tracks)
-    periapsis_xy = tracks["capture_track"][0]
+    tracks_rj = {
+        "t_hyp_s": tracks["t_hyp_s"],
+        "hyperbola_track": _to_rj(tracks["hyperbola_track"]),
+        "t_cap_s": tracks["t_cap_s"],
+        "capture_track": _to_rj(tracks["capture_track"]),
+    }
+    limit_rj = 1.2 * (_capture_axis_limit_km(tracks) / c.R_JUPITER)
+    periapsis_xy = tracks_rj["capture_track"][0]
 
     plot_outfile = output_dir / f"jupiter_capture_plot_{tag}.png"
     animation_outfile = output_dir / f"jupiter_capture_animation_{tag}.mp4"
 
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(8.5, 8.5))
     jupiter = plt.Circle(
-        (0.0, 0.0), c.R_JUPITER, color=PLANET_COLORS["Jupiter"], label="Jupiter"
+        (0.0, 0.0), 1.0, color=PLANET_COLORS["Jupiter"], label="Jupiter"
     )
     ax.add_patch(jupiter)
     ax.plot(
-        tracks["hyperbola_track"][:, 0],
-        tracks["hyperbola_track"][:, 1],
+        tracks_rj["hyperbola_track"][:, 0],
+        tracks_rj["hyperbola_track"][:, 1],
         color="black",
         linestyle="--",
         label="Inbound hyperbola",
     )
     ax.plot(
-        tracks["capture_track"][:, 0],
-        tracks["capture_track"][:, 1],
+        tracks_rj["capture_track"][:, 0],
+        tracks_rj["capture_track"][:, 1],
         color="teal",
         label="Captured orbit",
     )
     ax.scatter(
-        tracks["hyperbola_track"][0, 0],
-        tracks["hyperbola_track"][0, 1],
+        tracks_rj["hyperbola_track"][0, 0],
+        tracks_rj["hyperbola_track"][0, 1],
         color="black",
         s=35,
         label="Arrival start",
@@ -247,22 +468,23 @@ def plot_jupiter_capture(
         label="JOI burn",
     )
     ax.scatter(
-        tracks["capture_track"][-1, 0],
-        tracks["capture_track"][-1, 1],
+        tracks_rj["capture_track"][-1, 0],
+        tracks_rj["capture_track"][-1, 1],
         color="teal",
         marker=">",
         s=70,
         label="Spacecraft",
     )
+    _add_capture_annotations(ax, arrival_analysis, tracks_rj, limit_rj)
 
     ax.set_aspect("equal")
-    ax.set_xlim(-limit_km, limit_km)
-    ax.set_ylim(-limit_km, limit_km)
-    ax.set_xlabel("Jupiter-centered x (km)")
-    ax.set_ylabel("Jupiter-centered y (km)")
-    ax.set_title("Top-down Jupiter arrival and capture view")
+    ax.set_xlim(-limit_rj, limit_rj)
+    ax.set_ylim(-limit_rj, limit_rj)
+    ax.set_xlabel("Jupiter-centered x (Rj)")
+    ax.set_ylabel("Jupiter-centered y (Rj)")
+    ax.set_title("Top-down Jupiter arrival and JOI geometry")
 
-    sun_marker_xy = _sun_marker_position(sun_direction_xy_km, limit_km)
+    sun_marker_xy = _sun_marker_position(sun_direction_xy_km, limit_rj)
     if sun_marker_xy is not None:
         ax.scatter(
             sun_marker_xy[0],
@@ -271,46 +493,65 @@ def plot_jupiter_capture(
             edgecolors="black",
             s=120,
             zorder=6,
-            label="Sun direction",
         )
         ax.text(
-            sun_marker_xy[0] - (0.04 * limit_km),
+            sun_marker_xy[0] - (0.07 * limit_rj),
             sun_marker_xy[1],
-            "Sun",
+            "Sun (not to scale)",
             color="goldenrod",
             fontsize=9,
             va="center",
             ha="left" if sun_marker_xy[0] >= 0.0 else "right",
+            bbox=dict(boxstyle="round,pad=0.22", fc="white", ec="none", alpha=0.88),
         )
 
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.95)
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0.96, 1.0),
+        borderaxespad=0.0,
+        fontsize=8,
+        framealpha=0.95,
+    )
     fig.tight_layout()
     fig.savefig(plot_outfile, dpi=200, bbox_inches="tight", pad_inches=0.3)
     plt.close(fig)
 
-    _animate_jupiter_capture(tracks, animation_outfile, limit_km, sun_direction_xy_km)
+    _animate_jupiter_capture(
+        tracks, arrival_analysis, animation_outfile, limit_rj, sun_direction_xy_km
+    )
     return plot_outfile, animation_outfile
 
 
-def _animate_jupiter_capture(tracks, outfile, limit_km, sun_direction_xy_km=None):
+def _animate_jupiter_capture(
+    tracks, arrival_analysis, outfile, limit_rj, sun_direction_xy_km=None
+):
     """Animate the inbound hyperbola, JOI event, and subsequent captured orbits."""
     t_hyp_rel_s = tracks["t_hyp_s"] - tracks["t_hyp_s"][-1]
     t_cap_s = tracks["t_cap_s"]
-    hyperbola_track = tracks["hyperbola_track"]
-    capture_track = tracks["capture_track"]
+    hyperbola_track = _to_rj(tracks["hyperbola_track"])
+    capture_track = _to_rj(tracks["capture_track"])
+    periapsis_xy = capture_track[0]
+    frame_schedule = _build_animation_schedule(t_hyp_rel_s, t_cap_s)
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(9.5, 9.5))
     ax.set_aspect("equal")
-    ax.set_xlim(-limit_km, limit_km)
-    ax.set_ylim(-limit_km, limit_km)
-    ax.set_xlabel("Jupiter-centered x (km)")
-    ax.set_ylabel("Jupiter-centered y (km)")
+    ax.set_xlim(-limit_rj, limit_rj)
+    ax.set_ylim(-limit_rj, limit_rj)
+    ax.set_xlabel("Jupiter-centered x (Rj)")
+    ax.set_ylabel("Jupiter-centered y (Rj)")
     ax.set_title("Top-down Jupiter arrival and JOI animation")
 
-    jupiter = plt.Circle(
-        (0.0, 0.0), c.R_JUPITER, color=PLANET_COLORS["Jupiter"], alpha=0.8
-    )
+    jupiter = plt.Circle((0.0, 0.0), 1.0, color=PLANET_COLORS["Jupiter"], alpha=0.8)
     ax.add_patch(jupiter)
+    _add_capture_annotations(
+        ax,
+        arrival_analysis,
+        {
+            "hyperbola_track": hyperbola_track,
+            "capture_track": capture_track,
+        },
+        limit_rj,
+    )
 
     (hyper_line,) = ax.plot(
         [], [], color="black", linestyle="--", lw=1.5, label="Inbound hyperbola"
@@ -334,7 +575,7 @@ def _animate_jupiter_capture(tracks, outfile, limit_km, sun_direction_xy_km=None
 
     sun_pt = None
     sun_text = None
-    sun_marker_xy = _sun_marker_position(sun_direction_xy_km, limit_km)
+    sun_marker_xy = _sun_marker_position(sun_direction_xy_km, limit_rj)
     if sun_marker_xy is not None:
         (sun_pt,) = ax.plot(
             [sun_marker_xy[0]],
@@ -343,24 +584,25 @@ def _animate_jupiter_capture(tracks, outfile, limit_km, sun_direction_xy_km=None
             markersize=10,
             color="gold",
             markeredgecolor="black",
-            label="Sun direction",
         )
         sun_text = ax.text(
-            sun_marker_xy[0] - (0.04 * limit_km),
+            sun_marker_xy[0] - (0.07 * limit_rj),
             sun_marker_xy[1],
-            " Sun",
+            " Sun (not to scale)",
             color="goldenrod",
             fontsize=9,
             va="center",
             ha="left" if sun_marker_xy[0] >= 0.0 else "right",
+            bbox=dict(boxstyle="round,pad=0.22", fc="white", ec="none", alpha=0.88),
         )
 
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.95)
-
-    total_frames = 360
-    frame_times_s = np.linspace(t_hyp_rel_s[0], t_cap_s[-1], total_frames)
-    frame_dt_s = frame_times_s[1] - frame_times_s[0] if total_frames > 1 else 0.0
-    periapsis_xy = capture_track[0]
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0.96, 1.0),
+        borderaxespad=0.0,
+        fontsize=8,
+        framealpha=0.95,
+    )
 
     def init():
         """Reset all artists before the animation starts."""
@@ -378,30 +620,55 @@ def _animate_jupiter_capture(tracks, outfile, limit_km, sun_direction_xy_km=None
 
     def update(frame_number):
         """Advance the Jupiter arrival/capture animation by one frame."""
-        frame_time_s = frame_times_s[frame_number]
+        phase, frame_time_s = frame_schedule[frame_number]
         burn_pt.set_data([], [])
 
-        if frame_time_s < 0.0:
+        if phase == "approach":
             hyp_indices = np.where(t_hyp_rel_s <= frame_time_s)[0]
             last_idx = int(hyp_indices[-1]) if hyp_indices.size else 0
             sc_xy = _interp_track_point(frame_time_s, t_hyp_rel_s, hyperbola_track)
-            hyper_line.set_data(hyperbola_track[: last_idx + 1, 0], hyperbola_track[: last_idx + 1, 1])
+            hyper_line.set_data(
+                hyperbola_track[: last_idx + 1, 0], hyperbola_track[: last_idx + 1, 1]
+            )
             capture_line.set_data([], [])
             sc_pt.set_data([sc_xy[0]], [sc_xy[1]])
-            event_text.set_text("Inbound hyperbolic approach")
+            event_text.set_text(
+                "Phase: Inbound approach\n"
+                f"Jupiter-relative v_inf = {arrival_analysis['arrival_vinf_kms']:.2f} km/s"
+            )
+        elif phase == "periapsis_hold":
+            hyper_line.set_data(hyperbola_track[:, 0], hyperbola_track[:, 1])
+            capture_line.set_data([], [])
+            sc_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
+            burn_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
+            event_text.set_text(
+                "Phase: Periapsis arrival\n"
+                f"Periapsis radius = {arrival_analysis['capture_orbit']['periapsis_radius_rj']:.2f} Rj"
+            )
+        elif phase == "burn":
+            hyper_line.set_data(hyperbola_track[:, 0], hyperbola_track[:, 1])
+            capture_line.set_data([], [])
+            sc_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
+            if frame_number % 6 < 3:
+                burn_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
+            event_text.set_text(
+                "Phase: JOI burn\n"
+                f"Delta-v = {arrival_analysis['joi_delta_v_kms']:.2f} km/s"
+            )
         else:
             cap_indices = np.where(t_cap_s <= frame_time_s)[0]
             last_idx = int(cap_indices[-1]) if cap_indices.size else 0
             sc_xy = _interp_track_point(frame_time_s, t_cap_s, capture_track)
             hyper_line.set_data(hyperbola_track[:, 0], hyperbola_track[:, 1])
-            capture_line.set_data(capture_track[: last_idx + 1, 0], capture_track[: last_idx + 1, 1])
+            capture_line.set_data(
+                capture_track[: last_idx + 1, 0], capture_track[: last_idx + 1, 1]
+            )
             sc_pt.set_data([sc_xy[0]], [sc_xy[1]])
-            if abs(frame_time_s) <= max(frame_dt_s, 1e-9):
-                burn_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
-                event_text.set_text("JOI burn at periapsis")
-            else:
-                burn_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
-                event_text.set_text("Captured orbit after JOI")
+            burn_pt.set_data([periapsis_xy[0]], [periapsis_xy[1]])
+            event_text.set_text(
+                "Phase: Captured orbit\n"
+                f"Post-JOI periapsis speed = {arrival_analysis['capture_periapsis_speed_kms']:.2f} km/s"
+            )
 
         artists = [hyper_line, capture_line, sc_pt, burn_pt, event_text]
         if sun_pt is not None:
@@ -411,7 +678,7 @@ def _animate_jupiter_capture(tracks, outfile, limit_km, sun_direction_xy_km=None
         return tuple(artists)
 
     ani = FuncAnimation(
-        fig, update, frames=total_frames, init_func=init, blit=True, interval=30
+        fig, update, frames=len(frame_schedule), init_func=init, blit=True, interval=35
     )
     ani.save(outfile, writer="ffmpeg", fps=20)
     plt.close(fig)
