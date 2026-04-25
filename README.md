@@ -19,7 +19,7 @@ That downstream analysis now also produces a local Jupiter-centered capture plot
 The search now supports adaptive refinement:
 - a coarse global search over the full date span
 - automatic follow-on searches in narrower windows around the best candidate corridors
-- optional annotated porkchops driven by the final refined window automatically
+- optional annotated mission porkchop output for the best launch + JOI trajectory
 
 ## What The Code Does
 
@@ -66,10 +66,11 @@ That folder contains:
 - `mission_design_report.md`: human-readable searched-window, optimal-trajectory, and JOI/capture summary
 - `trajectory_ephemeris_snapshot.json`: reusable best-trajectory snapshot with Lambert leg data
 - `trajectory_ephemeris_snapshot.npz`: reusable ephemeris arrays for the best trajectories
-- adaptive search level summaries and the final annotated window
+- adaptive search level summaries and annotated mission-window metadata when enabled
 - porkchop plots
 - trajectory plots
 - trajectory animations
+- optional annotated mission porkchop such as `porkchop_mission_annotated.png`
 - optional downstream capture reanalysis products such as `jupiter_capture_mission.json`
 - optional downstream mission budget products such as `delta_v_budget_mission.json`
 - optional Jupiter-centered capture products such as `jupiter_capture_plot_mission.png`
@@ -117,7 +118,7 @@ Flyby-screening arguments:
 Annotated porkchop arguments:
 - `--annotate`: enable annotated porkchop plots
 
-When `--annotate` is enabled, the annotation rectangle is taken from the final refined search window automatically. The best-launch and best-arrival markers come from the best total-`v_inf` trajectory found by the adaptive search.
+When `--annotate` is enabled, the code writes a single annotated mission porkchop for the best launch + JOI trajectory found by the adaptive search. The annotation highlights only the winning mission point; the prior window rectangle and boundary arrows are no longer drawn.
 
 Notes:
 - On macOS/PyCharm, the code uses multiprocessing with the `spawn` start method.

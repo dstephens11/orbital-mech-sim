@@ -324,20 +324,6 @@ def _summary_payload(
     }
 
 
-def _representative_entries_by_class(best_by_metric):
-    """Choose one winning best-entry representative for each final trajectory class."""
-    entries_by_class = {}
-    for metric in ["total", "mission", "launch", "arrival"]:
-        entry = best_by_metric.get(metric)
-        if entry is None:
-            continue
-        class_name = plots.traj_class(entry["traj"])
-        current = entries_by_class.get(class_name)
-        if current is None or refinement.traj_total_vinf(entry["traj"]) < refinement.traj_total_vinf(current["traj"]):
-            entries_by_class[class_name] = entry
-    return entries_by_class
-
-
 def run(args):
     """Run the full search, refinement, reporting, and plotting pipeline."""
     ls.THRESH_KMS = args.thresh_kms
@@ -371,13 +357,10 @@ def run(args):
         raise RuntimeError("No trajectories were found in the searched windows.")
 
     plot_result = {
-        "window": best_total_entry["window"],
-        "stored": best_total_entry["stored"],
+        "window": best_mission_entry["window"],
+        "stored": best_mission_entry["stored"],
     }
-    window_info = refinement.make_window_info(best_total_entry) if args.annotate else None
-    annotated_entries_by_class = (
-        _representative_entries_by_class(best_by_metric) if args.annotate else {}
-    )
+    window_info = refinement.make_window_info(best_mission_entry) if args.annotate else None
 
     print("\n\n")
     print_solution_summary("Best total v_inf trajectory", best_total_entry["traj"], best_total_entry["epochs"])
@@ -410,9 +393,9 @@ def run(args):
         serialize_traj,
     )
 
-    if annotated_entries_by_class:
+    if args.annotate:
         print("Writing final annotated porkchop plots...")
-        plots.make_annotated_plots(annotated_entries_by_class, output_dir=output_dir)
+        plots.make_annotated_mission_plot(best_mission_entry, output_dir=output_dir)
     plots.plot_spacecraft_traj(
         best_total_entry["traj"],
         best_total_entry["epochs"],

@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 
 import matplotlib.dates as mdates
-import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -141,39 +140,13 @@ def plot_porkchop(grid, epochs, title, outfile: Path, plot_type="launch"):
     save_plot(fig, colorbar, outfile, plot_type)
 
 
-def _closest_launch_column_value(grid, epochs, launch_date):
-    """Return the minimum cost in the launch column nearest a given date."""
+def _grid_value_at_indices(grid, launch_index, arrival_index):
+    """Return the exact stored grid value at one launch/arrival cell."""
     try:
-        launch_index = np.argmin(np.abs(np.array(epochs) - launch_date))
-        column = grid[:, launch_index]
-        return np.nan if np.all(np.isnan(column)) else np.nanmin(column)
+        value = grid[arrival_index, launch_index]
+        return float(value) if np.isfinite(value) else np.nan
     except Exception:
         return np.nan
-
-
-def _boundary_launch_annotation(grid, epochs, launch_date, side):
-    """Pick a finite launch column to annotate a window boundary."""
-    epoch_array = np.array(epochs)
-    finite_cols = np.where(np.isfinite(grid).any(axis=0))[0]
-    if finite_cols.size == 0:
-        return None, np.nan
-
-    target_index = int(np.argmin(np.abs(epoch_array - launch_date)))
-    if side == "start":
-        candidate_cols = finite_cols[finite_cols >= target_index]
-        if candidate_cols.size == 0:
-            candidate_cols = finite_cols
-        launch_index = int(candidate_cols[0])
-    elif side == "end":
-        candidate_cols = finite_cols[finite_cols <= target_index]
-        if candidate_cols.size == 0:
-            candidate_cols = finite_cols
-        launch_index = int(candidate_cols[-1])
-    else:
-        raise ValueError(f"Invalid boundary side: {side}")
-
-    column = grid[:, launch_index]
-    return epochs[launch_index], float(np.nanmin(column))
 
 
 def plot_annotated_porkchop(
@@ -185,25 +158,17 @@ def plot_annotated_porkchop(
     plot_type="launch",
 ):
     """Overlay the best point and the final refinement window on a porkchop plot."""
-    fig, ax, colorbar, arrival_start, arrival_end = build_plot(grid, epochs, title)
+    fig, ax, colorbar, _, _ = build_plot(grid, epochs, title)
 
     best_launch = window_info["best_launch"]
     best_arrival = window_info["best_arrival"]
-    window_start = window_info["window_start"]
-    window_end = window_info["window_end"]
+    best_launch_index = window_info["best_launch_index"]
+    best_arrival_index = window_info["best_arrival_index"]
 
     best_x = mdates.date2num(best_launch)
     best_y = mdates.date2num(best_arrival)
-    win_x0 = mdates.date2num(window_start)
-    win_x1 = mdates.date2num(window_end)
 
-    vinf_best = _closest_launch_column_value(grid, epochs, best_launch)
-    start_launch_date, vinf_start = _boundary_launch_annotation(
-        grid, epochs, window_start, "start"
-    )
-    end_launch_date, vinf_end = _boundary_launch_annotation(
-        grid, epochs, window_end, "end"
-    )
+    vinf_best = _grid_value_at_indices(grid, best_launch_index, best_arrival_index)
 
     ax.plot(
         best_x,
@@ -220,37 +185,6 @@ def plot_annotated_porkchop(
         xytext=(15, 15),
         textcoords="offset points",
         fontsize=10,
-        bbox=dict(boxstyle="round", fc="white", ec="black"),
-        arrowprops=dict(arrowstyle="->"),
-        annotation_clip=False,
-    )
-
-    rect = patches.Rectangle(
-        (win_x0, mdates.date2num(arrival_start)),
-        win_x1 - win_x0,
-        mdates.date2num(arrival_end) - mdates.date2num(arrival_start),
-        linewidth=2,
-        edgecolor="white",
-        facecolor="none",
-        linestyle="--",
-    )
-    ax.add_patch(rect)
-    ax.annotate(
-        f"Window start\n$v_\\infty$={vinf_start:.2f}",
-        xy=(mdates.date2num(start_launch_date), best_y),
-        xytext=(20, 60),
-        textcoords="offset points",
-        fontsize=9,
-        bbox=dict(boxstyle="round", fc="white", ec="black"),
-        arrowprops=dict(arrowstyle="->"),
-        annotation_clip=False,
-    )
-    ax.annotate(
-        f"Window end\n$v_\\infty$={vinf_end:.2f}",
-        xy=(mdates.date2num(end_launch_date), best_y),
-        xytext=(-110, -40),
-        textcoords="offset points",
-        fontsize=9,
         bbox=dict(boxstyle="round", fc="white", ec="black"),
         arrowprops=dict(arrowstyle="->"),
         annotation_clip=False,
@@ -276,41 +210,34 @@ def make_plots(stored, epochs, output_dir: Path = Path("plots")):
         _plot_family(output_dir, epochs, stored, plot_type)
 
 
-def make_annotated_plots(entries_by_class, output_dir: Path = Path("plots")):
-    """Create annotated porkchops for the distinct winning trajectory classes."""
+def make_annotated_mission_plot(best_entry, output_dir: Path = Path("plots")):
+    """Create one annotated mission porkchop for the best mission trajectory class."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    spec_by_class = {
-        class_name: (slug, title) for class_name, slug, title in PLOT_SPECS
+    title_by_class = {
+        class_name: title for class_name, _, title in PLOT_SPECS
     }
+    class_name = traj_class(best_entry["traj"])
+    title = title_by_class.get(class_name, "Porkchop: Mission")
+    window_info = {
+        "best_launch": best_entry["epochs"][best_entry["traj"]["indices"][0]],
+        "best_arrival": best_entry["epochs"][best_entry["traj"]["indices"][-1]],
+        "best_launch_index": best_entry["traj"]["indices"][0],
+        "best_arrival_index": best_entry["traj"]["indices"][-1],
+        "window_start": best_entry["window"]["start"],
+        "window_end": best_entry["window"]["stop"],
+    }
+    grid = make_porkchop(best_entry["stored"], best_entry["epochs"], class_name, "mission")
+    if not _has_porkchop_data(grid):
+        return
 
-    for class_name, best_entry in entries_by_class.items():
-        spec = spec_by_class.get(class_name)
-        if spec is None:
-            continue
-        slug, title = spec
-        window_info = {
-            "best_launch": best_entry["epochs"][best_entry["traj"]["indices"][0]],
-            "best_arrival": best_entry["epochs"][best_entry["traj"]["indices"][-1]],
-            "window_start": best_entry["window"]["start"],
-            "window_end": best_entry["window"]["stop"],
-        }
-        for plot_type in ["launch", "arrival", "total", "mission"]:
-            grid = make_porkchop(
-                best_entry["stored"], best_entry["epochs"], class_name, plot_type
-            )
-            if not _has_porkchop_data(grid):
-                continue
-            annotated_outfile = output_dir / Path(
-                f"porkchop_{plot_type}_{slug}_annotated.png"
-            )
-            plot_annotated_porkchop(
-                grid,
-                best_entry["epochs"],
-                title,
-                window_info,
-                annotated_outfile,
-                plot_type,
-            )
+    plot_annotated_porkchop(
+        grid,
+        best_entry["epochs"],
+        title,
+        window_info,
+        output_dir / Path("porkchop_mission_annotated.png"),
+        "mission",
+    )
 
 
 def plot_spacecraft_traj(
